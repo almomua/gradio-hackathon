@@ -1,6 +1,6 @@
 ---
 title: 'research-nexus'
-emoji: ':D'
+emoji: '📈'
 colorFrom: 'red'
 colorTo: 'green'
 sdk: 'gradio'
