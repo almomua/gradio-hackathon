@@ -4,6 +4,8 @@ LangChain/LangGraph Agent with MCP Integration
 
 import asyncio
 import nest_asyncio
+import warnings
+import logging
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain.agents import create_agent
@@ -19,6 +21,11 @@ from tools import (
 
 # Allow nested event loops (fixes gRPC async issues)
 nest_asyncio.apply()
+
+# Suppress MCP schema warnings and other verbose logs
+warnings.filterwarnings("ignore", message=".*Key.*is not supported in schema.*")
+logging.getLogger("langchain_mcp_adapters").setLevel(logging.ERROR)
+logging.getLogger("mcp").setLevel(logging.ERROR)
 
 # Global variables
 agent = None
@@ -54,9 +61,20 @@ async def build_agent_async():
     
     # Load MCP tools if servers are configured
     if MCP_SERVERS:
-        mcp_client = MultiServerMCPClient(MCP_SERVERS)
-        mcp_tools = await mcp_client.get_tools()
-        tools.extend(mcp_tools)
+        # Suppress stderr during MCP client initialization to hide schema warnings
+        import sys
+        import io
+        old_stderr = sys.stderr
+        sys.stderr = io.StringIO()
+        
+        try:
+            mcp_client = MultiServerMCPClient(MCP_SERVERS)
+            mcp_tools = await mcp_client.get_tools()
+            tools.extend(mcp_tools)
+        finally:
+            # Restore stderr
+            sys.stderr = old_stderr
+        
         print(f"✅ Loaded {len(mcp_tools)} tools from MCP servers")
         for tool in mcp_tools:
             desc = tool.description[:50] if tool.description else "No description"
@@ -99,28 +117,8 @@ def convert_history_to_messages(history):
     return messages
 
 
-def print_thinking_header():
-    """Print a header for thinking process."""
-    print("\n" + "="*60)
-    print("🧠 AGENT THINKING PROCESS")
-    print("="*60)
-
-
-def print_thinking_step(step_type: str, content: str):
-    """Print a thinking step to terminal."""
-    icons = {
-        "tool_call": "🔧",
-        "tool_result": "📊",
-        "thought": "💭",
-        "action": "⚡",
-        "final": "✅"
-    }
-    icon = icons.get(step_type, "•")
-    print(f"\n{icon} {step_type.upper()}: {content}")
-
-
 async def get_response_async(message: str, history: list, thread_id: str) -> str:
-    """Get response from agent asynchronously with memory and print thinking."""
+    """Get response from agent asynchronously with memory and print thinking process."""
     global agent
     
     if agent is None:
@@ -135,62 +133,79 @@ async def get_response_async(message: str, history: list, thread_id: str) -> str
         # Config with thread_id for memory persistence
         config = {"configurable": {"thread_id": thread_id}}
         
-        print_thinking_header()
-        print(f"📝 USER QUERY: {message[:100]}{'...' if len(message) > 100 else ''}")
+        print("\n" + "="*80)
+        print("🤔 AGENT THINKING PROCESS")
+        print("="*80)
         
-        # Stream agent execution to show thinking process
+        # Suppress stderr during agent execution to hide schema warnings
+        import sys
+        import io
+        old_stderr = sys.stderr
+        sys.stderr = io.StringIO()
+        
+        # Stream agent execution to see intermediate steps
         final_response = None
         step_count = 0
         
-        async for event in agent.astream({"messages": messages}, config=config):
-            step_count += 1
-            
-            # Handle different event types
-            if "agent" in event:
-                agent_data = event["agent"]
-                if "messages" in agent_data:
-                    for msg in agent_data["messages"]:
-                        # Check if it's a tool call
-                        if hasattr(msg, "tool_calls") and msg.tool_calls:
-                            for tool_call in msg.tool_calls:
-                                tool_name = tool_call.get("name", "unknown")
-                                tool_args = str(tool_call.get("args", {}))[:100]
-                                print_thinking_step("tool_call", f"{tool_name}({tool_args}...)")
+        try:
+            async for event in agent.astream({"messages": messages}, config=config):
+                for node_name, node_data in event.items():
+                    step_count += 1
+                    
+                    # Print node being executed
+                    if node_name == "agent":
+                        print(f"\n💭 Step {step_count}: Agent Reasoning")
+                        print("-" * 80)
                         
-                        # Regular message content
-                        elif hasattr(msg, "content") and msg.content:
-                            content_preview = str(msg.content)[:200]
-                            print_thinking_step("thought", content_preview)
-            
-            elif "tools" in event:
-                tool_data = event["tools"]
-                if "messages" in tool_data:
-                    for msg in tool_data["messages"]:
-                        if hasattr(msg, "content"):
-                            result_preview = str(msg.content)[:150]
-                            print_thinking_step("tool_result", result_preview)
-            
-            # Store the final response
-            if "messages" in event.get("agent", {}):
-                final_response = event["agent"]["messages"]
+                        # Check if agent is calling a tool
+                        if "messages" in node_data:
+                            last_message = node_data["messages"][-1]
+                            
+                            # Tool call
+                            if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+                                for tool_call in last_message.tool_calls:
+                                    print(f"🔧 Tool Call: {tool_call['name']}")
+                                    print(f"   Args: {tool_call.get('args', {})}")
+                            
+                            # Agent message
+                            elif hasattr(last_message, "content") and last_message.content:
+                                content = last_message.content
+                                if content and len(content) < 500:
+                                    print(f"💬 Thought: {content[:200]}...")
+                    
+                    elif node_name == "tools":
+                        print(f"\n🛠️  Step {step_count}: Tool Execution")
+                        print("-" * 80)
+                        
+                        if "messages" in node_data:
+                            for msg in node_data["messages"]:
+                                if hasattr(msg, "name"):
+                                    print(f"📊 Tool: {msg.name}")
+                                    result = str(msg.content)
+                                    # Truncate long results
+                                    if len(result) > 300:
+                                        print(f"   Result: {result[:300]}... (truncated)")
+                                    else:
+                                        print(f"   Result: {result}")
+                    
+                    # Store final response
+                    if "messages" in node_data:
+                        final_response = node_data["messages"][-1].content
         
-        # Extract final answer
-        if final_response:
-            final_content = final_response[-1].content
-            print_thinking_step("final", f"Response ready ({len(final_content)} chars)")
-            print("="*60 + "\n")
-            return final_content
+        finally:
+            # Restore stderr
+            sys.stderr = old_stderr
         
-        # Fallback: use regular invoke if streaming didn't work
-        response = await agent.ainvoke({"messages": messages}, config=config)
-        final_content = response["messages"][-1].content
-        print_thinking_step("final", "Response generated (fallback mode)")
-        print("="*60 + "\n")
-        return final_content
+        print("\n" + "="*80)
+        print("✅ THINKING COMPLETE")
+        print("="*80 + "\n")
+        
+        return final_response if final_response else "No response generated"
         
     except Exception as e:
-        print(f"\n❌ ERROR: {str(e)}\n")
-        print("="*60 + "\n")
+        # Restore stderr in case of error
+        sys.stderr = old_stderr
+        print(f"\n❌ Error during agent execution: {str(e)}\n")
         return f"Error: {str(e)}"
 
 

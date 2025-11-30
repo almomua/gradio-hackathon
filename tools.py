@@ -20,14 +20,6 @@ MCP_SERVERS = {
             "X-Blaxel-Workspace": "mrezzat"
         }
     },
-    "blaxel-search": {
-        "url": "https://run.blaxel.ai/mrezzat/functions/blaxel-search/mcp",
-        "transport": "streamable_http",
-        "headers": {
-            "Authorization": "Bearer bl_aaabg6si5twurjva322vqkcdwzm67f7e",
-            "X-Blaxel-Workspace": "mrezzat"
-        }
-    },
 }
 
 # System prompt for the agent
@@ -72,6 +64,27 @@ Provide a structured summary with:
 - Describe what the image will contain before generating
 - Ask: "I'll create a visual showing [description]. Does this sound helpful, or would you prefer a different visualization?"
 
+## IMAGE FORMATTING RULES (CRITICAL)
+
+**WHENEVER you receive an image URL from any tool, you MUST format it as markdown:**
+
+✅ **CORRECT FORMAT:**
+```
+![Image Description](https://example.com/image.jpg)
+```
+
+❌ **WRONG - Don't just paste the URL:**
+```
+https://example.com/image.jpg
+```
+
+**Examples:**
+- If you get a poster image: `![Scientific Poster](https://i.ibb.co/abc123/poster.jpg)`
+- If you get a diagram: `![Research Diagram](https://example.com/diagram.png)`
+- If you get a visualization: `![Data Visualization](https://example.com/viz.svg)`
+
+**ALWAYS use markdown image format for ALL image URLs you receive from tools!**
+
 ## EDGE CASE HANDLING
 
 ### Invalid/Inaccessible Links
@@ -114,6 +127,7 @@ Provide a structured summary with:
 - Always inform the user when using a tool: "Let me search for that paper..."
 - If a tool fails, explain and offer alternatives
 - Don't assume tool success - verify results before presenting
+- **IMPORTANT:** When a tool returns an image URL, ALWAYS format it as: `![Description](URL)`
 
 ## MEMORY UTILIZATION
 - Remember user's stated preferences throughout the conversation
@@ -130,7 +144,11 @@ If the user's first message is unclear, respond with:
 
 What research topic would you like to explore today?"
 
-Remember: Your goal is to make academic research accessible and understandable. Guide the user through a smooth research experience."""
+Remember: Your goal is to make academic research accessible and understandable. Guide the user through a smooth research experience.
+
+## CRITICAL REMINDER
+**EVERY time you receive an image URL from a tool, format it as markdown image:**
+`![Image Description](URL)` - NOT just the raw URL!"""
 
 # Model configuration
 MODEL_NAME = "gemini-2.5-flash"
