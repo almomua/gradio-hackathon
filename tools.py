@@ -16,7 +16,7 @@ MCP_SERVERS = {
         "url": "https://run.blaxel.ai/mrezzat/functions/mcp-research/mcp",
         "transport": "streamable_http",
         "headers": {
-            "Authorization": f"Bearer {os.getenv('BLAXEL_API_KEY')}",
+            "Authorization": f"Bearer {os.getenv('BLAXEL_TOKEN')}",
             "X-Blaxel-Workspace": "mrezzat"
         }
     },
